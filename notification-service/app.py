@@ -118,21 +118,27 @@ def handle_order_event():
         event_data = request.json
         app.logger.info(f"Received order event: {event_data}")
         
-        event_type = event_data.get("event_type")
-        order_id = event_data.get("order_id")
-        customer_id = event_data.get("customer_id")
+        # Extract the actual event data from Dapr's CloudEvent format
+        if 'data' in event_data:
+            actual_data = event_data['data']
+        else:
+            actual_data = event_data
+        
+        event_type = actual_data.get("event_type")
+        order_id = actual_data.get("order_id")
+        customer_id = actual_data.get("customer_id")
         
         if event_type == "order_created":
-            message = f"Your order {order_id} has been created successfully! Total amount: ${event_data.get('total_amount', 0):.2f}"
+            message = f"Your order {order_id} has been created successfully! Total amount: ${actual_data.get('total_amount', 0):.2f}"
             create_notification(
                 recipient=customer_id,
                 message=message,
                 notification_type="order_confirmation",
-                related_data={"order_id": order_id, "total_amount": event_data.get("total_amount")}
+                related_data={"order_id": order_id, "total_amount": actual_data.get("total_amount")}
             )
             
         elif event_type == "order_status_updated":
-            status = event_data.get("status")
+            status = actual_data.get("status")
             message = f"Your order {order_id} status has been updated to: {status}"
             create_notification(
                 recipient=customer_id,
@@ -154,27 +160,39 @@ def handle_inventory_event():
         event_data = request.json
         app.logger.info(f"Received inventory event: {event_data}")
         
-        event_type = event_data.get("event_type")
-        order_id = event_data.get("order_id")
+        # Extract the actual event data from Dapr's CloudEvent format
+        if 'data' in event_data:
+            actual_data = event_data['data']
+        else:
+            actual_data = event_data
         
-        if event_type == "inventory_checked":
-            inventory_status = event_data.get("inventory_status", [])
+        event_type = actual_data.get("event_type")
+        order_id = actual_data.get("order_id")
+        customer_id = actual_data.get("customer_id", "unknown_customer")
+        
+        if event_type == "inventory_processed":
+            inventory_status = actual_data.get("inventory_status", [])
+            all_items_reserved = actual_data.get("all_items_reserved", False)
             
-            # Check if all items are available
-            all_available = all(item["status"] == "available" for item in inventory_status)
-            
-            if all_available:
-                message = f"Great news! All items for order {order_id} are in stock and ready for processing."
-                notification_type = "inventory_available"
+            if all_items_reserved:
+                reserved_items = [f"{item['product_id']} ({item['reserved_quantity']} units)" 
+                                for item in inventory_status if item["status"] == "reserved"]
+                message = f"Great news! All items for order {order_id} have been reserved: {', '.join(reserved_items)}"
+                notification_type = "inventory_reserved"
             else:
-                insufficient_items = [item for item in inventory_status if item["status"] == "insufficient"]
-                product_ids = [item["product_id"] for item in insufficient_items]
-                message = f"Order {order_id} has inventory issues. Insufficient stock for products: {', '.join(product_ids)}"
+                # Find items that couldn't be reserved
+                problem_items = []
+                for item in inventory_status:
+                    if item["status"] == "insufficient":
+                        problem_items.append(f"{item['product_id']} (need more, only {item['available_quantity']} available)")
+                    elif item["status"] == "reservation_failed":
+                        problem_items.append(f"{item['product_id']} (reservation failed)")
+                
+                message = f"Order {order_id} has inventory issues: {', '.join(problem_items)}"
                 notification_type = "inventory_insufficient"
             
-            # Note: In a real system, you'd get the customer_id from the order
             create_notification(
-                recipient="system_admin",  # In production, get actual customer_id
+                recipient=customer_id,
                 message=message,
                 notification_type=notification_type,
                 related_data={"order_id": order_id, "inventory_status": inventory_status}

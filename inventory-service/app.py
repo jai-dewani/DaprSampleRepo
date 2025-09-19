@@ -95,6 +95,80 @@ def get_inventory(product_id):
         app.logger.error(f"Error retrieving inventory: {str(e)}")
         return jsonify({"error": "Internal server error"}), 500
 
+@app.route('/inventory/clear', methods=['DELETE'])
+def clear_all_inventory():
+    """Clear all inventory items and reservations"""
+    try:
+        # Get all inventory keys from Redis using Dapr state store
+        # Note: This is a simplified approach. In production, you'd use proper key scanning
+        cleared_items = []
+        
+        # List of known product IDs that we'll attempt to clear
+        # In a real system, you'd scan the state store for all inventory keys
+        test_products = ["laptop-001", "mouse-001", "keyboard-001"]
+        
+        for product_id in test_products:
+            # Try to get the item first
+            inventory_item = get_inventory_item(product_id)
+            if inventory_item:
+                cleared_items.append({
+                    "product_id": product_id,
+                    "name": inventory_item.get("name", f"Product {product_id}"),
+                    "quantity_cleared": inventory_item.get("quantity", 0)
+                })
+                
+                # Delete inventory item
+                delete_url = f"{DAPR_URL}/v1.0/state/redis-statestore/inventory:{product_id}"
+                response = requests.delete(delete_url)
+                
+                if response.status_code != 204:
+                    app.logger.error(f"Failed to delete inventory item {product_id}: {response.text}")
+        
+        # Also clear reservations (simplified approach)
+        # In production, you'd scan for all reservation keys
+        reservation_keys_to_clear = []
+        for product_id in test_products:
+            # Try common reservation patterns
+            for i in range(1, 10):  # Clear potential reservation keys
+                reservation_key = f"reservation:order-{i}:{product_id}"
+                delete_url = f"{DAPR_URL}/v1.0/state/redis-statestore/{reservation_key}"
+                requests.delete(delete_url)  # Don't worry about errors for non-existent keys
+        
+        app.logger.info(f"Cleared {len(cleared_items)} inventory items")
+        
+        return jsonify({
+            "message": "All inventory cleared successfully",
+            "cleared_items": cleared_items,
+            "total_cleared": len(cleared_items)
+        }), 200
+        
+    except Exception as e:
+        app.logger.error(f"Error clearing inventory: {str(e)}")
+        return jsonify({"error": "Internal server error"}), 500
+
+@app.route('/inventory/list', methods=['GET'])
+def list_all_inventory():
+    """List all inventory items (helper endpoint for debugging)"""
+    try:
+        # This is a simplified approach for demo purposes
+        # In production, you'd properly scan the state store
+        inventory_items = []
+        test_products = ["laptop-001", "mouse-001", "keyboard-001"]
+        
+        for product_id in test_products:
+            inventory_item = get_inventory_item(product_id)
+            if inventory_item:
+                inventory_items.append(inventory_item)
+        
+        return jsonify({
+            "inventory_items": inventory_items,
+            "total_items": len(inventory_items)
+        }), 200
+        
+    except Exception as e:
+        app.logger.error(f"Error listing inventory: {str(e)}")
+        return jsonify({"error": "Internal server error"}), 500
+
 @app.route('/inventory/<product_id>/reserve', methods=['POST'])
 def reserve_inventory(product_id):
     """Reserve inventory for an order"""
@@ -180,11 +254,14 @@ def handle_order_event():
         event_type = actual_data.get("event_type")
         
         if event_type == "order_created":
-            # Process order items and check inventory
+            # Process order items and reserve inventory
             order_id = actual_data.get("order_id")
+            customer_id = actual_data.get("customer_id")
             items = actual_data.get("items", [])
             
             inventory_status = []
+            all_items_reserved = True
+            
             for item in items:
                 product_id = item.get("product_id")
                 quantity = item.get("quantity", 1)
@@ -192,29 +269,62 @@ def handle_order_event():
                 inventory_item = get_inventory_item(product_id)
                 
                 if inventory_item and inventory_item["quantity"] >= quantity:
-                    inventory_status.append({
-                        "product_id": product_id,
-                        "status": "available",
-                        "available_quantity": inventory_item["quantity"]
-                    })
+                    # Reserve inventory by reducing the quantity
+                    inventory_item["quantity"] -= quantity
+                    inventory_item["last_updated"] = datetime.utcnow().isoformat()
+                    
+                    # Save updated inventory
+                    state_url = f"{DAPR_URL}/v1.0/state/redis-statestore"
+                    state_data = [{"key": f"inventory:{product_id}", "value": inventory_item}]
+                    
+                    response = requests.post(state_url, json=state_data)
+                    if response.status_code == 204:
+                        # Create reservation record
+                        reservation = {
+                            "product_id": product_id,
+                            "order_id": order_id,
+                            "quantity": quantity,
+                            "reserved_at": datetime.utcnow().isoformat()
+                        }
+                        
+                        reservation_data = [{"key": f"reservation:{order_id}:{product_id}", "value": reservation}]
+                        requests.post(state_url, json=reservation_data)
+                        
+                        inventory_status.append({
+                            "product_id": product_id,
+                            "status": "reserved",
+                            "reserved_quantity": quantity,
+                            "remaining_quantity": inventory_item["quantity"]
+                        })
+                        app.logger.info(f"Reserved {quantity} units of {product_id} for order {order_id}")
+                    else:
+                        inventory_status.append({
+                            "product_id": product_id,
+                            "status": "reservation_failed",
+                            "available_quantity": inventory_item["quantity"]
+                        })
+                        all_items_reserved = False
                 else:
                     inventory_status.append({
                         "product_id": product_id,
                         "status": "insufficient",
                         "available_quantity": inventory_item["quantity"] if inventory_item else 0
                     })
+                    all_items_reserved = False
             
-            # Publish inventory check result
+            # Publish inventory processing result
             inventory_event = {
                 "order_id": order_id,
+                "customer_id": customer_id,
                 "inventory_status": inventory_status,
-                "event_type": "inventory_checked"
+                "all_items_reserved": all_items_reserved,
+                "event_type": "inventory_processed"
             }
             
             pubsub_url = f"{DAPR_URL}/v1.0/publish/redis-pubsub/inventory-events"
             requests.post(pubsub_url, json=inventory_event)
             
-            app.logger.info(f"Inventory check completed for order {order_id}")
+            app.logger.info(f"Inventory processing completed for order {order_id}. All reserved: {all_items_reserved}")
         
         # Return empty response with 200 status for successful processing
         return '', 200
