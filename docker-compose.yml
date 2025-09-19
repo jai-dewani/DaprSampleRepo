@@ -1,0 +1,52 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    networks:
+      - dapr-demo
+
+  order-service:
+    build: ./order-service
+    ports:
+      - "5001:5001"
+    depends_on:
+      - redis
+    networks:
+      - dapr-demo
+    environment:
+      - FLASK_ENV=development
+
+  inventory-service:
+    build: ./inventory-service
+    ports:
+      - "5002:5002"
+    depends_on:
+      - redis
+    networks:
+      - dapr-demo
+    environment:
+      - FLASK_ENV=development
+
+  notification-service:
+    build: ./notification-service
+    ports:
+      - "5003:5003"
+    depends_on:
+      - redis
+    networks:
+      - dapr-demo
+    environment:
+      - FLASK_ENV=development
+
+volumes:
+  redis_data:
+
+networks:
+  dapr-demo:
+    driver: bridge
