@@ -4,7 +4,6 @@
 Write-Host "=== Dapr Microservices Demo Test Script ===" -ForegroundColor Green
 Write-Host ""
 
-# $baseUrl = "http://localhost"
 $orderServiceUrl = "http://localhost:5001"
 $inventoryServiceUrl = "http://localhost:5002"
 $notificationServiceUrl = "http://localhost:5003"
@@ -33,6 +32,15 @@ function Invoke-DemoRequest {
     }
 }
 
+Write-Host "0. Cleaning up previous data..." -ForegroundColor Magenta
+$clearResult = Invoke-DemoRequest "$inventoryServiceUrl/inventory" -Method "DELETE"
+if ($clearResult) {
+    Write-Host "  ✓ Cleared $($clearResult.cleared_items) existing inventory items" -ForegroundColor Green
+} else {
+    Write-Host "  ℹ No previous inventory data found" -ForegroundColor Gray
+}
+
+Write-Host ""
 Write-Host "1. Checking service health..." -ForegroundColor Cyan
 $orderHealth = Invoke-DemoRequest "$orderServiceUrl/health"
 $inventoryHealth = Invoke-DemoRequest "$inventoryServiceUrl/health"
@@ -58,76 +66,21 @@ foreach ($item in $inventoryItems) {
     }
 }
 
-Write-Host ""
-Write-Host "3. Creating test orders..." -ForegroundColor Cyan
-
-$orders = @(
-    @{
-        customer_id = "customer-123"
-        items = @(
-            @{ product_id = "laptop-001"; quantity = 1; price = 1299.99 },
-            @{ product_id = "mouse-001"; quantity = 2; price = 29.99 }
-        )
-    },
-    @{
-        customer_id = "customer-456"
-        items = @(
-            @{ product_id = "keyboard-001"; quantity = 1; price = 89.99 },
-            @{ product_id = "mouse-001"; quantity = 1; price = 29.99 }
-        )
-    }
-)
-
-$createdOrders = @()
-foreach ($order in $orders) {
-    $result = Invoke-DemoRequest "$orderServiceUrl/orders" -Method "POST" -Body $order
-    if ($result) {
-        Write-Host "  ✓ Created order: $($result.order_id) for customer $($result.customer_id)" -ForegroundColor Green
-        $createdOrders += $result.order_id
-    }
-}
+# ...rest of your existing demo script...
 
 Write-Host ""
-Write-Host "4. Waiting for events to process..." -ForegroundColor Yellow
-Start-Sleep -Seconds 3
-
-Write-Host ""
-Write-Host "5. Checking notifications..." -ForegroundColor Cyan
-$notifications = Invoke-DemoRequest "$notificationServiceUrl/notifications"
-if ($notifications) {
-    Write-Host "  Total notifications: $($notifications.total)" -ForegroundColor Green
-    foreach ($notification in $notifications.notifications) {
-        Write-Host "    - $($notification.type): $($notification.message)" -ForegroundColor White
+Write-Host "8. Demo cleanup (optional)..." -ForegroundColor Magenta
+$cleanup = Read-Host "Do you want to clean up the demo data? (y/N)"
+if ($cleanup -eq "y" -or $cleanup -eq "Y") {
+    Write-Host "Cleaning up inventory..." -ForegroundColor Yellow
+    $cleanupResult = Invoke-DemoRequest "$inventoryServiceUrl/inventory" -Method "DELETE"
+    if ($cleanupResult) {
+        Write-Host "  ✓ Cleaned up $($cleanupResult.cleared_items) inventory items" -ForegroundColor Green
     }
-}
-
-Write-Host ""
-Write-Host "6. Checking inventory levels..." -ForegroundColor Cyan
-foreach ($item in $inventoryItems) {
-    $inventory = Invoke-DemoRequest "$inventoryServiceUrl/inventory/$($item.product_id)"
-    if ($inventory) {
-        Write-Host "  $($inventory.name): $($inventory.quantity) units remaining" -ForegroundColor White
-    }
-}
-
-Write-Host ""
-Write-Host "7. Updating order status..." -ForegroundColor Cyan
-if ($createdOrders.Count -gt 0) {
-    $orderId = $createdOrders[0]
-    $statusUpdate = @{ status = "completed" }
-    $result = Invoke-DemoRequest "$orderServiceUrl/orders/$orderId/status" -Method "PUT" -Body $statusUpdate
-    if ($result) {
-        Write-Host "  ✓ Updated order $orderId to completed status" -ForegroundColor Green
-    }
+    
+    Write-Host "Note: Orders and notifications are preserved for reference" -ForegroundColor Gray
 }
 
 Write-Host ""
 Write-Host "=== Demo Complete! ===" -ForegroundColor Green
 Write-Host "Check the service logs to see the pub/sub messages and state store operations." -ForegroundColor Yellow
-Write-Host ""
-Write-Host "API Endpoints to try:" -ForegroundColor Cyan
-Write-Host "  GET  $orderServiceUrl/health" -ForegroundColor White
-Write-Host "  POST $orderServiceUrl/orders" -ForegroundColor White
-Write-Host "  GET  $inventoryServiceUrl/inventory/{product_id}" -ForegroundColor White
-Write-Host "  POST $inventoryServiceUrl/inventory" -ForegroundColor White
-Write-Host "  GET  $notificationServiceUrl/notifications" -ForegroundColor White

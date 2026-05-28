@@ -224,5 +224,73 @@ def handle_order_event():
         # Return 500 for retriable errors
         return '', 500
 
+@app.route('/inventory', methods=['DELETE'])
+def clear_all_inventory():
+    """Clear all inventory items"""
+    try:
+        # Get all inventory keys from state store
+        state_url = f"{DAPR_URL}/v1.0/state/redis-statestore"
+        
+        # First, get all keys (this is a simplified approach)
+        # In production, you might want to use a separate index
+        inventory_keys = []
+        
+        # For demo purposes, we'll track known product IDs
+        # You could also implement a proper key listing mechanism
+        known_products = ["laptop-001", "mouse-001", "keyboard-001"]
+        
+        for product_id in known_products:
+            # Check if item exists
+            get_url = f"{state_url}/inventory:{product_id}"
+            response = requests.get(get_url)
+            if response.status_code == 200:
+                inventory_keys.append(f"inventory:{product_id}")
+        
+        # Delete all inventory items
+        if inventory_keys:
+            delete_data = [{"key": key} for key in inventory_keys]
+            delete_response = requests.post(f"{state_url}/bulk", json=delete_data)
+            
+            if delete_response.status_code == 204:
+                app.logger.info(f"Cleared {len(inventory_keys)} inventory items")
+                return jsonify({
+                    "message": f"Successfully cleared {len(inventory_keys)} inventory items",
+                    "cleared_items": len(inventory_keys)
+                })
+            else:
+                return jsonify({"error": "Failed to clear inventory"}), 500
+        else:
+            return jsonify({
+                "message": "No inventory items found to clear",
+                "cleared_items": 0
+            })
+        
+    except Exception as e:
+        app.logger.error(f"Error clearing inventory: {str(e)}")
+        return jsonify({"error": "Internal server error"}), 500
+
+@app.route('/inventory/<product_id>', methods=['DELETE'])
+def delete_inventory_item(product_id):
+    """Delete a specific inventory item"""
+    try:
+        state_url = f"{DAPR_URL}/v1.0/state/redis-statestore/inventory:{product_id}"
+        
+        # Check if item exists first
+        response = requests.get(state_url)
+        if response.status_code == 204:  # No content means key doesn't exist
+            return jsonify({"error": "Inventory item not found"}), 404
+        
+        # Delete the item
+        delete_response = requests.delete(state_url)
+        if delete_response.status_code == 204:
+            app.logger.info(f"Deleted inventory item: {product_id}")
+            return jsonify({"message": f"Successfully deleted inventory for {product_id}"})
+        else:
+            return jsonify({"error": "Failed to delete inventory item"}), 500
+        
+    except Exception as e:
+        app.logger.error(f"Error deleting inventory item {product_id}: {str(e)}")
+        return jsonify({"error": "Internal server error"}), 500
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5002, debug=True)
