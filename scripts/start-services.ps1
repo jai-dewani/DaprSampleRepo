@@ -18,6 +18,8 @@ try {
         Write-Host "Redis is not running. Starting Redis with Docker..." -ForegroundColor Yellow
         docker run -d --name redis-dapr -p 6379:6379 redis:7-alpine
         Start-Sleep -Seconds 5
+    } else {
+        Write-Host "Redis is already running." -ForegroundColor Green
     }
 } catch {
     Write-Host "Starting Redis with Docker..." -ForegroundColor Yellow
@@ -25,21 +27,21 @@ try {
     Start-Sleep -Seconds 5
 }
 
-# Set the components path
-$componentsPath = Join-Path $PSScriptRoot "..\dapr-components"
+# Set the resources path (formerly components path)
+$resourcesPath = Join-Path $PSScriptRoot "..\dapr-components"
 
 Write-Host "Starting Order Service..." -ForegroundColor Cyan
-Start-Process PowerShell -ArgumentList "-NoExit", "-Command", "cd '$PSScriptRoot\..\order-service'; dapr run --app-id order-service --app-port 5001 --dapr-http-port 3500 --components-path '$componentsPath' -- python app.py"
+Start-Process PowerShell -ArgumentList "-NoExit", "-Command", "cd '$PSScriptRoot\..\order-service'; dapr run --app-id order-service --app-port 5001 --dapr-http-port 3500 --resources-path '$resourcesPath' -- python app.py"
 
 Start-Sleep -Seconds 3
 
 Write-Host "Starting Inventory Service..." -ForegroundColor Cyan
-Start-Process PowerShell -ArgumentList "-NoExit", "-Command", "cd '$PSScriptRoot\..\inventory-service'; dapr run --app-id inventory-service --app-port 5002 --dapr-http-port 3501 --components-path '$componentsPath' -- python app.py"
+Start-Process PowerShell -ArgumentList "-NoExit", "-Command", "cd '$PSScriptRoot\..\inventory-service'; dapr run --app-id inventory-service --app-port 5002 --dapr-http-port 3501 --resources-path '$resourcesPath' -- python app.py"
 
 Start-Sleep -Seconds 3
 
 Write-Host "Starting Notification Service..." -ForegroundColor Cyan
-Start-Process PowerShell -ArgumentList "-NoExit", "-Command", "cd '$PSScriptRoot\..\notification-service'; dapr run --app-id notification-service --app-port 5003 --dapr-http-port 3502 --components-path '$componentsPath' -- python app.py"
+Start-Process PowerShell -ArgumentList "-NoExit", "-Command", "cd '$PSScriptRoot\..\notification-service'; dapr run --app-id notification-service --app-port 5003 --dapr-http-port 3502 --resources-path '$resourcesPath' -- python app.py"
 
 Write-Host ""
 Write-Host "All services are starting up!" -ForegroundColor Green

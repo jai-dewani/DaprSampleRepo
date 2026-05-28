@@ -122,6 +122,7 @@ def update_order_status(order_id):
         # Publish status update event
         event_data = {
             "order_id": order_id,
+            "customer_id": order["customer_id"],
             "status": new_status,
             "event_type": "order_status_updated"
         }
